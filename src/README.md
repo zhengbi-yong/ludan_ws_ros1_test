@@ -1,47 +1,87 @@
-## bipedal-robot
+# Ludan 双足机器人控制工作空间
 
-该程序是没有手臂版本。
+## 项目概览
+- **系统框架**：基于 ROS 1 Noetic、ros-control 与 OCS2，融合质心动力学建模与非线性模型预测控制（NMPC）。
+- **硬件接口**：统一的串口桥接节点 `dmbot_serial`，支持带有最多 30 个电机的多肢体配置，并对旧的固定布局节点保持兼容。
+- **功能包划分**：`legged_*` 系列负责硬件抽象层、控制算法与示例；`simple_hybrid_joint_controller*` 提供关节层控制器及调试工具；`wanren_arm` 与 `right_arm_*` 承担上肢硬件与 MoveIt! 支持。
+- **命名规范**：所有关节以 `机器人名_肢体名_关节名` 形式发布到 `/joint_states`，便于在多控制板、多命名空间下统一管理。
 
-该程序跑在ubuntu20.04上，使用ROS1-Noetic，需要x86架构电脑，**比较吃cpu**。
+## 环境要求
+| 组件 | 说明 |
+| --- | --- |
+| 操作系统 | Ubuntu 20.04 LTS（x86_64），建议禁用 `ModemManager` 以保证串口通信稳定 |
+| ROS | ROS 1 Noetic，建议使用 `rosdep` 安装常用依赖 |
+| 构建工具 | `catkin_tools`、`python3-catkin-tools`、`doxygen`、`liburdfdom-dev`、`libassimp-dev` 等 |
+| 优化器 | [OCS2](https://leggedrobotics.github.io/ocs2/installation.html)，需额外安装 Boost ≥ 1.71、Eigen ≥ 3.3 以及 Raisim |
+| 其他库 | `ros-noetic-serial`、`ros-noetic-joy`、`libserialport-dev`、`libglpk-dev`、`libglfw3-dev`、`onnxruntime 1.7` |
 
-该程序使用OCS2和ros-control框架，控制方法是非线性模型预测控制，模型采用质心动力学。
+> **提示**：`onnxruntime` 建议安装到 `~/.local`，并在 `~/.bashrc` 中追加
+> `export onnxruntime_DIR=~/.local` 与 `export LD_LIBRARY_PATH=~/.local/lib:${LD_LIBRARY_PATH}`。
 
-该程序是基于[livelybot_dynamic_control](https://github.com/HighTorque-Robotics/livelybot_dynamic_control)、[hunter_bipedal_control](https://bridgedp.github.io/hunter_bipedal_control)以及[legged_control](https://github.com/qiayuanl/legged_control)上进行一些改进，主要是对**约束**进行了修改。
+## 快速开始
+### 1. 准备 OCS2 工作空间（推荐 `~/ocs2_ws`）
+1. 创建并初始化工作空间：
+   ```bash
+   mkdir -p ~/ocs2_ws/src && cd ~/ocs2_ws
+   catkin init
+   catkin config -DCMAKE_BUILD_TYPE=RelWithDebInfo
+   ```
+2. 克隆必要仓库（保持子模块）：
+   ```bash
+   cd src
+   git clone --recurse-submodules https://github.com/leggedrobotics/pinocchio.git
+   git clone --recurse-submodules https://github.com/leggedrobotics/hpp-fcl.git
+   git clone https://github.com/leggedrobotics/ocs2_robotic_assets.git
+   git clone --depth 1 https://github.com/raisimTech/raisimLib.git -b v1.1.01
+   git clone https://github.com/leggedrobotics/elevation_mapping_cupy.git
+   git clone https://github.com/ANYbotics/grid_map.git
+   git clone https://github.com/leggedrobotics/ocs2.git
+   ```
+3. 按顺序编译，确保上一步无报错再执行下一步：
+   ```bash
+   catkin build elevation_mapping_cupy
+   catkin build grid_map
+   catkin build hpp-fcl
+   catkin build pinocchio
+   catkin build ocs2_robotic_assets
+   catkin build ocs2    # 该步骤耗时最长
+   ```
+4. 将 `~/ocs2_ws/devel/setup.bash` 写入 `~/.bashrc` 或在需要时手动 `source`。
 
-## Ludan 结构化命名与配置
-
-为了让“ludan”机器人在扩展不同的肢体时保持清晰的命名，本仓库新增了结构化的电机配置方式。所有控制节点都会读取统一的参数，并按照 `机器人名_肢体名_关节名` 的格式在 `/joint_states` 中发布电机名称。
+### 2. 准备本仓库（推荐 `~/catkin_ws`）
+1. 创建工作空间并获取代码：
+   ```bash
+   mkdir -p ~/catkin_ws/src
+   cd ~/catkin_ws/src
+   git clone https://gitee.com/your-team/ludan_ws_ros1.git   # 以实际仓库地址为准
+   ```
+2. 安装依赖：
+   ```bash
+   cd ~/catkin_ws
+   rosdep install --from-paths src --ignore-src --rosdistro noetic -y
+   ```
+3. 初始化构建配置并编译：
+   ```bash
+   catkin init
+   catkin config -DCMAKE_BUILD_TYPE=RelWithDebInfo
+   catkin build
+   ```
+4. 将 `source ~/catkin_ws/devel/setup.bash` 写入 `~/.bashrc`，随后执行 `source ~/.bashrc` 使环境变量生效。
 
 ## 仓库结构概览
+- `dmbot_serial`：统一的串口桥接节点，读取参数服务器中的 `motor_layout` 并与 STM32 电机驱动板通信，同时在 `/joint_states` 发布反馈。
+- `simple_hybrid_joint_controller*`：不同肢体的 ros-control 控制器，提供 `command_one`、`command_same`、`command_matrix` 等话题接口。
+- `legged_common` / `legged_hw` / `legged_examples`：核心算法、硬件接口与示例 Launch，用于连接 OCS2、状态估计与底层控制。
+- `right_arm_hw`、`right_arm_moveit_config`、`wanren_arm`：上肢硬件接口与 MoveIt! 规划支持。
+- `motor_control_gui4a.py` 等工具：串口连通性测试、单电机调试 GUI。
 
-整个工作空间采用标准的 `catkin` 结构，`src/` 目录下的主要功能包如下：
+## 统一的电机命名与参数
+### 基本参数
+- `~robot_name`：机器人名称，默认 `ludan`。
+- `~motor_layout`：电机布局列表。每个条目包含 `limb`、`joint`、`type`，并按照 CAN ID 顺序排列。
+- `~num_motors`：仅在没有提供 `motor_layout` 时作为备选，用于指定电机总数。
 
-- `dmbot_serial`：统一的串口桥接节点，负责读取参数服务器中的电机布局（`motor_layout`）并与 STM32 电机驱动板通信，同时在 `/joint_states` 发布反馈信息。
-- `dmbot_serial_leftarm`、`dmbot_serial_neck` 等：在旧版本中用于固定布局的串口节点，现在可以直接由 `dmbot_serial` 统一替代。
-- `simple_hybrid_joint_controller*`：针对不同肢体的 ros-control 控制器及其 `launch` 文件，常用于真实机械臂/腿的初始化与调试。
-- `legged_common`、`legged_hw`、`legged_examples`：双足机器人控制的核心算法、硬件接口与示例配置，对应 OCS2 + ros-control 框架。
-- `right_arm_hw`、`right_arm_moveit_config`、`wanren_arm`：右臂硬件接口与 MoveIt! 规划配置，用于上肢控制与轨迹规划。
-- `motor_control_gui4a.py` 等工具：提供基础的硬件连通性测试和 GUI 调试脚本。
-
-建议先阅读各包下的 `README` 或 `launch` 文件，了解节点命名与话题接口，再按照需求组合使用。
-
-### 关键参数
-
-- `~robot_name`：机器人名称，默认值为 `ludan`。
-- `~motor_layout`：电机布局列表。每个元素需要包含 `limb`（肢体名称）、`joint`（关节名称）以及 `type`（电机型号）。支持的肢体名称不限于 `left_arm`、`right_arm`、`left_leg`、`right_leg`、`waist`、`neck`，也可以自定义，例如 `arm_3`、`aux_leg_1` 等。
-- `~num_motors`：可选备用参数。当未提供 `motor_layout` 时用于指定电机数量。
-
-### 示例配置
-
-新版默认参数已经按照当前 ludan 机器人硬件配置好了 **30 个电机**：
-
-- 左臂、右臂各 7 个关节。
-- 左腿、右腿各 6 个关节。
-- 脖子 3 个关节。
-- 腰部 1 个关节。
-
-如果节点启动时没有显式传入 `motor_layout`，串口桥接程序会自动加载以下默认布局：
-
+### 默认 30 电机布局
 ```yaml
 robot_name: ludan
 motor_layout:
@@ -76,15 +116,10 @@ motor_layout:
   - {limb: neck,      joint: roll,           type: 4340}
   - {limb: waist,     joint: yaw,            type: 10010l}
 ```
+如未显式传入参数，`dmbot_serial` 会加载上述默认值。通过 `rosparam load` 或 Launch 文件可覆盖某些肢体或更换型号。
 
-可以使用 `rosparam` 或 YAML 文件覆盖上述默认值，例如只配置部分电机或替换电机型号。扩展到更多肢体时只需继续追加条目即可，控制程序会自动识别数量并生成对应的串口通信帧。
-
-### 多末端控制板的推荐配置流程
-
-当机器人接入多个串口控制板（例如 `/dev/mcu_neck`、`/dev/mcu_leftarm`、`/dev/mcu_rightarm`、`/dev/mcu_leftleg`、`/dev/mcu_rightleg`、`/dev/mcu_waist`）时，可以为每块控制板单独启动一个 `dmbot_serial::robot` 节点，并通过命名空间隔离参数：
-
-1. 为每个控制板准备一份 YAML 布局文件，示例：
-
+### 多控制板场景
+1. 为每块控制板准备独立的 YAML：
    ```yaml
    # config/neck.yaml
    robot_name: ludan
@@ -92,49 +127,19 @@ motor_layout:
      - {limb: neck, joint: pitch, type: 4340}
      - {limb: neck, joint: yaw,   type: 4340}
    ```
-
-   ```yaml
-   # config/right_leg.yaml
-   robot_name: ludan
-   motor_layout:
-     - {limb: right_leg, joint: hip_yaw,   type: 10010l}
-     - {limb: right_leg, joint: hip_roll,  type: 10010l}
-     - {limb: right_leg, joint: hip_pitch, type: 10010l}
-     - {limb: right_leg, joint: knee,      type: 6248p}
-     - {limb: right_leg, joint: ankle,     type: 4340}
-   ```
-
-2. 在运行前，依次加载参数并指定串口端口，例如：
-
+2. 以命名空间区分串口节点：
    ```bash
    rosparam load config/neck.yaml /neck_bridge
    roslaunch dmbot_serial test_motor.launch \
      port:=/dev/mcu_neck robot_name:=ludan __ns:=neck_bridge
    ```
+3. 在上层控制器中根据需要 Remap `joint_states` 或编写聚合节点，实现多块控制板的数据整合。
 
-   ```bash
-   rosparam load config/right_leg.yaml /right_leg_bridge
-   roslaunch dmbot_serial test_motor.launch \
-     port:=/dev/mcu_rightleg robot_name:=ludan __ns:=right_leg_bridge
-   ```
-
-   这样每个命名空间都会生成独立的 `/joint_states` 子话题（例如 `/neck_bridge/joint_states`），同时保留统一的命名规则，便于在上层控制器中聚合。
-
-3. 若需要集中使用所有电机的关节状态，可以在上层节点中对多个命名空间的 `joint_states` 进行 remap 或编写聚合节点。
-
-`dmbot_serial` 会自动按照 `motor_layout` 的长度调整串口帧，因此只需保证 YAML 文件与实际接线顺序一致即可，无需修改 C++ 源码。
-
-### 控制指定串口上的某几个电机
-
-在完成上面的多控制板配置后，可以通过 `simple_hybrid_joint_controller` 系列控制器点动某些特定的 CAN ID。整个流程分为三步：
-
-1. **为目标 MCU 准备独立的 `motor_layout`。**
-   `dmbot_serial::robot` 按照 `motor_layout` 的顺序把下标 `0..N-1` 映射到下位机的 CAN ID，因此 YAML 中的排列必须与实际 ID 一一对应。如果只想控制 `/dev/mcu_neck` 上的 CAN ID 7，可以准备如下示例（放在任意可访问目录，例如 `config/neck_can7.yaml`）：
-
+### 指定 CAN ID 点动电机
+1. 使用占位条目保证 YAML 中的顺序与硬件 CAN ID 对齐，例如仅控制 `/dev/mcu_neck` 的 CAN 7：
    ```yaml
    robot_name: ludan
    motor_layout:
-     # 前 7 个条目只占位，保证索引与硬件的 CAN 号对应
      - {limb: neck, joint: reserve_0, type: 4340}
      - {limb: neck, joint: reserve_1, type: 4340}
      - {limb: neck, joint: reserve_2, type: 4340}
@@ -142,422 +147,56 @@ motor_layout:
      - {limb: neck, joint: reserve_4, type: 4340}
      - {limb: neck, joint: reserve_5, type: 4340}
      - {limb: neck, joint: reserve_6, type: 4340}
-     # 第 8 个条目（索引 7）就是需要控制的 CAN ID 7
-     - {limb: neck, joint: pitch, type: 4340}
+     - {limb: neck, joint: pitch,     type: 4340}
    ```
-
-   `/dev/mcu_leftleg` 上只想驱动 CAN ID 10 时同理，把 0~9 号补齐后再放入真正的关节信息，例如：
-
-   ```yaml
-   robot_name: ludan
-   motor_layout:
-     # 0~9 号为占位/其他电机，保持与硬件接线一致
-     - {limb: left_leg, joint: hip_yaw,        type: 10010l}
-     - {limb: left_leg, joint: hip_roll,       type: 10010l}
-     - {limb: left_leg, joint: hip_pitch,      type: 10010l}
-     - {limb: left_leg, joint: knee,           type: 6248p}
-     - {limb: left_leg, joint: ankle_pitch,    type: 4340}
-     - {limb: left_leg, joint: ankle_roll,     type: 4340}
-     - {limb: left_leg, joint: reserve_6,      type: 4340}
-     - {limb: left_leg, joint: reserve_7,      type: 4340}
-     - {limb: left_leg, joint: reserve_8,      type: 4340}
-     - {limb: left_leg, joint: reserve_9,      type: 4340}
-     # 下标 10（CAN ID 10）的真正目标电机
-     - {limb: left_leg, joint: ankle_extension, type: 4340}
-   ```
-
-   通过 `rosparam load config/neck_can7.yaml /neck` 或 `rosparam load config/left_leg_can10.yaml /left_leg` 将其挂到对应命名空间下。载入后可以通过 `rosparam get /neck/motor_layout` 等命令再次确认顺序。
-
-2. **启动对应 MCU 的硬件接口与控制器。**
-   - 颈部：
-
-     ```bash
-     roslaunch simple_hybrid_joint_controller_neck bringup_real.launch \
-       port:=/dev/mcu_neck baud:=921600
-     ```
-
-     上述 launch 会在 `neck` 命名空间中启动硬件接口以及 `all_joints_hjc_neck` 控制器。
-
-   - 左腿（示例使用可自定义命名空间的 `backbringup_real.launch`）：
-
-     ```bash
-     roslaunch simple_hybrid_joint_controller backbringup_real.launch \
-       ns:=left_leg port:=/dev/mcu_leftleg baud:=921600
-     ```
-
-     启动成功后，`/left_leg/all_joints_hjc` 控制器就绪，可同时管理 14 个关节（默认顺序为左腿 0~6、右腿 7~13）。
-
-   如果 MCU 尚未解锁串口权限，别忘了在运行前执行 `sudo chmod a+rw /dev/mcu_*` 并确认 `ModemManager` 已停用。
-
-3. **通过 `command_one` 话题点动目标电机。**
-`AllJointsHybridController` 的单路接口约定消息格式为 `[index, pos, vel, kp, kd, ff]`，缺省字段会自动沿用上一次指令。将 `index` 设置为前述 `motor_layout` 对应的下标即可控制指定 CAN ID。例如：
-
+2. 启动硬件接口：
    ```bash
-   # 让 /dev/mcu_neck 上的 CAN 7 做 0.2 rad 的小幅摆动
+   roslaunch simple_hybrid_joint_controller_neck bringup_real.launch \
+     port:=/dev/mcu_neck baud:=921600
+   ```
+3. 通过 `command_one` 话题下发命令：
+   ```bash
    rostopic pub -r 10 /neck/all_joints_hjc_neck/command_one \
      std_msgs/Float64MultiArray "data: [7, 0.2, 0.0, 20.0, 1.0, 0.0]"
-
-   # 让 /dev/mcu_leftleg 上的 CAN 10 定位到 -0.1 rad，KP/KD 可按实际硬件调整
-   rostopic pub /left_leg/all_joints_hjc/command_one \
-     std_msgs/Float64MultiArray "data: [10, -0.1, 0.0, 30.0, 2.0, 0.0]"
    ```
-
-   发布过程中可以订阅 `neck/joint_states` 或 `left_leg/joint_states` 来确认反馈是否来自目标电机。若需要恢复静止，只需再次发布零姿态/零力矩（或调用 `command_same` 将 KP/KD 置零）即可。
-
-### 从 `roslaunch` 到末端电机的完整信号链
-
-在全身控制的场景下，可以参考 `simple_hybrid_joint_controller/launch/backbringup_real.launch` 这类入口 `launch` 文件。完整的数据流如下：
-
-1. **启动阶段的节点与参数加载**。
-   - `backbringup_real.launch` 首先在指定命名空间下注入串口参数（`port`、`baud`）以及 `loop_hz`、`thread_priority` 等控制循环参数，并 `include` `legged_dm_hw/launch/legged_dm_hw.launch`。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L1-L34】
-   - `legged_dm_hw.launch` 会调用 `xacro` 生成 `legged_dm_hw/legged_robot_description`，加载 `dm.yaml` 中的循环频率、电源限制等配置，然后启动硬件节点 `legged_dm_hw`。【F:legged_examples/legged_dm_hw/launch/legged_dm_hw.launch†L1-L20】【F:legged_examples/legged_dm_hw/config/dm.yaml†L1-L6】
-
-2. **硬件节点内部的初始化**。
-   - `legged_dm_hw` 可执行体创建 `legged::DmHW` 硬件接口，并在其 `init()` 中订阅 `/hybrid_cmd`、`/imu/data` 与 `/emergency_stop`，同时根据参数决定是否允许手动话题覆盖。【F:legged_examples/legged_dm_hw/src/legged_dm_hw.cpp†L46-L70】【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L19-L40】
-   - `DmHW` 继承自 `LeggedHW`。在基类 `LeggedHW::init()` 中会加载 URDF 并实例化一个 `dmbot_serial::robot`，它负责与 STM32 电机接口板进行串口通信，并自动按照 `motor_layout` 创建每个电机的名称、索引和类型。【F:legged_hw/src/LeggedHW.cpp†L15-L33】【F:dmbot_serial/src/robot_connect.cpp†L52-L163】
-
-3. **控制器加载与话题接口**。
-   - `backbringup_real.launch` 中的 `controller_manager` `spawner` 会在同一命名空间下加载 `joint_state_controller` 与 `simple_hjc/AllJointsHybridController`。前者以 100 Hz 发布关节状态，后者提供 `/command_same`、`/command_matrix`、`/command_one` 等多个话题接口接收位置、速度、阻尼、力矩命令。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L18-L33】【F:simple_hybrid_joint_controller/src/AllJointsHybridController.cpp†L1-L135】
-   - `AllJointsHybridController` 在 `update()` 中把缓存的命令写入 `HybridJointHandle`，相当于设置每个关节的目标状态。【F:simple_hybrid_joint_controller/src/AllJointsHybridController.cpp†L47-L101】
-
-4. **命令下发到串口**。
-   - `DmHW::write()` 会将控制器写入的目标值（或手动覆盖指令）乘以电机方向系数并存入 `dmSendcmd_`，随后逐一调用 `motorsInterface->fresh_cmd_motor_data()` 和 `send_motor_data()`。这一接口由 `dmbot_serial::robot` 提供，将浮点命令缓存并立即刷新到串口发送缓冲区。【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L56-L114】【F:dmbot_serial/src/robot_connect.cpp†L327-L376】
-   - `send_motor_data()` 根据电机型号选择不同的量程，把位置、速度、KP、KD、力矩转换为对应的 12/16-bit 无符号整数，封装成 11 字节的数据帧（`0xFE` 帧头 + 电机索引 + 8 字节数据 + 校验），通过 `serial::Serial` 写入到 STM32。【F:dmbot_serial/src/robot_connect.cpp†L327-L420】
-
-5. **反馈回流**。
-   - STM32 返回的反馈帧同样由 `dmbot_serial::robot::get_motor_data_thread()` 按预期长度接收、校验，依据电机型号调用 `dmXXXX_fbdata()` 将编码值反解到浮点的关节位置、速度与力矩。`DmHW::read()` 便从 `motorsInterface` 中取出这些浮点数，更新 ROS 控制框架的关节状态，并通过 `joint_state_controller` 发布出来。【F:dmbot_serial/src/robot_connect.cpp†L244-L324】【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L42-L85】
-
-综上，`roslaunch` 启动的硬件节点、控制器、串口桥接构成了一条闭环链路：上层控制器通过话题发送目标 → `AllJointsHybridController` 写入 `HybridJointHandle` → `DmHW` 把命令映射到电机方向并交给串口桥接 → `dmbot_serial::robot` 编码后写入串口 → STM32 执行并反馈，再经过相反流程回到 ROS 的 `joint_states`，从而实现对全身电机的精确控制。
-
-### 使用建议
-
-1. 肢体名称会自动转为小写并替换为空格的字符，因此建议直接使用英文或数字组合，例如 `left_arm`、`leg_front_left`、`arm_extra_1`。
-2. 若某些肢体暂时没有安装，可保留空列表或直接不在 `motor_layout` 中声明，代码会保持兼容。
-3. 所有串口桥接脚本、测试程序都会根据 `motor_layout` 自动调整数组长度，无需手工修改常量。
-
-## 学习
-1. 理论框架
-
-该程序的数学原理框架可看[基于NMPC和WBC的双足机器人控制框架简介](https://mcpocket.blog.csdn.net/article/details/136541630?fromshare=blogdetail&sharetype=blogdetail&sharerId=136541630&sharerefer=PC&sharesource=sleeer_zzZZ&sharefrom=from_link)
-
-2. 程序框架
-
-该程序框架是采用ros-control标准格式，对ros-control不太了解的兄弟可先参考用ros-control控制达妙电机的例程[dm-control](https://gitee.com/xauter/dm-control)
-
-## 安装
-***安装需要ros基础，这里使用catkin build编译，而不是catkin_make***
-### 安装依赖
-
-- [OCS2](https://leggedrobotics.github.io/ocs2/installation.html#prerequisites)
-
-- [ROS1-Noetic](http://wiki.ros.org/noetic)
-
-### 安装 ROS1-Noetic
- 这个网上安装教程很多，很简单。
- 
-### 安装 OCS2
-***注意：安装OCS2要保证网络好***
-
-- C++ compiler with C++11 support
-
-- Eigen (v3.3)
-```shell
-sudo apt-get update
-sudo apt-get install libeigen3-dev
-```
-
-- Boost C++ (v1.71)
-```shell
-wget https://boostorg.jfrog.io/artifactory/main/release/1.71.0/source/boost_1_71_0.tar.bz2
-tar --bzip2 -xf boost_1_71_0.tar.bz2
-cd boost_1_71_0
-./bootstrap.sh
-sudo ./b2 install
-```
-如果解压boost_1_71\_0.tar.bz2失败，可以自己去官网下载boost_1_71_0.tar.bz2,官网链接如下：
-
-[https://www.boost.org/users/history/](https://www.boost.org/users/history/)
-
-
-- 安装剩余依赖
-```shell
-sudo apt install ros-noetic-catkin
-sudo apt install libglpk-dev libglfw3-dev
-sudo apt install ros-noetic-pybind11-catkin
-sudo apt install python3-catkin-tools
-sudo apt install doxygen doxygen-latex
-sudo apt install liburdfdom-dev liboctomap-dev libassimp-dev
-sudo apt-get install ros-noetic-rqt-multiplot
-sudo apt install ros-noetic-grid-map-msgs
-sudo apt install ros-noetic-octomap-msgs
-sudo apt install libreadline-dev
-sudo apt install libcgal-dev
-sudo apt update && sudo apt install checkinstall
-sudo apt-get install libserialport0 libserialport-dev
-sudo apt install ros-noetic-serial
-sudo apt install ros-noetic-joy
-sudo apt install ros-noetic-joy-teleop
-```
-
-- 安装相关库
-1. 针对ocs2单独创建一个工作空间
-```shell
-mkdir -p ~/ocs2_ws/src
-cd ~/ocs2_ws/src
-```
-2. 下载功能包***（先不编译）***
-
-在~/ocs2_ws/src目录下，打开终端，输入：
-```shell
- git clone --recurse-submodules https://github.com/leggedrobotics/pinocchio.git
- git clone --recurse-submodules https://github.com/leggedrobotics/hpp-fcl.git
- git clone https://github.com/leggedrobotics/ocs2_robotic_assets.git
- git clone --depth 1 https://github.com/raisimTech/raisimLib.git -b v1.1.01
- git clone https://github.com/leggedrobotics/elevation_mapping_cupy.git
- git clone https://github.com/ANYbotics/grid_map.git
- git clone https://github.com/leggedrobotics/ocs2.git
-```
-![](./src/docs/catalog_folder.png)
-
-3. 编译Raisim
-```shell
-cd ~/ocs2_ws/src/raisimLib
-mkdir build
-cd build
-cmake .. 
-make -j4 && sudo checkinstall
-```
-
-4. ONNX Runtime 依赖
-```shell
-cd /tmp
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.7.0/onnxruntime-linux-x64-1.7.0.tgz
-tar xf onnxruntime-linux-x64-1.7.0.tgz
-mkdir -p ~/.local/bin ~/.local/include/onnxruntime ~/.local/lib ~/.local/share/cmake/onnxruntime
-rsync -a /tmp/onnxruntime-linux-x64-1.7.0/include/ ~/.local/include/onnxruntime
-rsync -a /tmp/onnxruntime-linux-x64-1.7.0/lib/ ~/.local/lib
-rsync -a ~/ocs2_ws/src/ocs2/ocs2_mpcnet/ocs2_mpcnet_core/misc/onnxruntime/cmake/ ~/.local/share/cmake/onnxruntime
-mkdir -p ~/.local/share/onnxruntime/cmake/
-rsync -a ~/ocs2_ws/src/ocs2/ocs2_mpcnet/ocs2_mpcnet_core/misc/onnxruntime/cmake/ ~/.local/share/onnxruntime/cmake/
-```
-然后需要在.bashrc手动设置环境变量，否则在后续安装ocs2时，容易找不到该软件包
-打开终端，输入：
-```shell
-cd
-gedit .bashrc
-```
-然后在最后一行输入：
-```shell
-export onnxruntime_DIR=~/.local/
-export LD_LIBRARY_PATH=~/.local/lib:${LD_LIBRARY_PATH}
-```
-
-5. 编译（最关键的步骤来了，**编译需要在ocs2_ws目录下进行**）
-
-首先，优先编译elevation_mapping_cupy
-
-***注意：一定要添加catkin config -DCMAKE_BUILD_TYPE=RelWithDebInfo，如下所示***
-```shell
-cd ~/ocs2_ws/
-catkin init
-catkin config -DCMAKE_BUILD_TYPE=RelWithDebInfo
-catkin build elevation_mapping_cupy
-```
-没报错的话，编译grid_map
-```shell
-catkin build grid_map
-```
-没报错的话，编译hpp-fcl
-```shell
-catkin build hpp-fcl
-```
-没报错的话，编译pinocchio
-```shell
-catkin build pinocchio
-```
-没报错的话，编译ocs2_robotic_assets
-```shell
-catkin build ocs2_robotic_assets
-```
-没报错的话，编译ocs2（这一步编译要等很长时间）
-```shell
-catkin build ocs2
-```
-
-6. 测试
-
-编译完成之后需要在.bashrc手动设置环境变量
-打开终端，输入：
-```shell
-cd
-gedit .bashrc
-```
-然后在.bashrc文件里最后一行输入：
-```shell
-source ~/ocs2_ws/devel/setup.bash
-```
-然后在终端输入：
-```shell
-source .bashrc
-```
-然后启动ocs2的一个四足例程（首次运行需要等一下，ocs2有个预先计算，等待rviz出现图形）
-```shell
-roslaunch ocs2_legged_robot_ros legged_robot_ddp.launch
-```
-<img src="./src/docs/leg_example.png" width="500" height="auto">
-
-OCS2安装成功！！！！
-
-### 安装和编译双足控制程序
-
-首先打开终端，输入：
-```shell
-mkdir -p ~/catkin_ws
-cd ~/catkin_ws
-```
-然后把gitee上的src文件夹放到catkin_ws目录下，如下所示（不能有其他东西）
-![](./src/docs/src.png)
-
-打开终端，输入：
-```shell
-cd ~/catkin_ws
-catkin init
-catkin config -DCMAKE_BUILD_TYPE=RelWithDebInfo
-catkin build
-```
-然后在.bashrc文件里最后一行输入：
-```
-source ~/catkin_ws/devel/setup.bash
-```
-然后打开终端，输入：
-```
-cd
-source .bashrc
-```
-
-## 仿真与实机的运行
-***注意：一开始运行实机前最好先运行仿真，检查仿真没问题后，再运行实机***
-### 仿真，分两种情况，一种是有遥控器，一种是没有遥控器
-#### 没有遥控器
-1. 运行gazebo仿真并且载入控制器:
-
-```shell
-roslaunch legged_controllers one_start_gazebo.launch
-```
-<img src="./src/docs/sim.png" width="600" height="auto">
-
-2. 在rqt里面设置***kp_position=100***, ***kd_position=1***，然后在gazebo里按住键盘***Ctrl+Shift+R***让机器人站起来。
-
-3. 新建一个终端，发布/reset_estimation话题，重置状态:
-```shell
-rostopic pub --once /reset_estimation std_msgs/Float32 "data: 0.0" 
-```
-4. 新建一个终端，发布/cmd_vel话题，**这里速度不能为0**，不然话题无法发布出去:
-```bash
-rosrun rqt_robot_steering rqt_robot_steering 
-```
-<img src="./src/docs/vel.png" width="300" height="auto">
-
-5. 新建一个终端，开启控制器：
-```shell
-rostopic pub --once /load_controller std_msgs/Float32 "data: 0.0" 
-```
-6. 最后发布/set_walk话题:
-```shell
-rostopic pub --once /set_walk std_msgs/Float32 "data: 0.0" 
-```
-
-
-rostopic pub --once /controllers/legged_controller/cmd_joint_velocity std_msgs/Float64MultiArray '{
-  "layout": {
-    "dim": [
-      {"label": "joints", "size": 12, "stride": 12}
-    ],
-    "data_offset": 0
-  },
-  "data": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
-}'
-
-#### 有遥控器（能支持ros的遥控器都能直接用）
-
-1. 运行gazebo仿真并且载入控制器:
-```shell
-roslaunch legged_controllers one_start_gazebo.launch
-```
-2. 在rqt里面设置***kp_position=100***, ***kd_position=1***，然后在gazebo里按住键盘***Ctrl+Shift+R***让机器人站起来。
-
-后面的步骤就使用遥控器按键，每一个按键对应一个话题，对应关系如下图所示：
-
-<img src="./src/docs/handle.png" width="500" height="auto">
-
-### 实机
-
-1. 给stm32h7开发板烧录下位机程序，上电，此时所有电机应该全亮绿灯
-
-2. 在你的电脑里运行上位机程序
-首先检查开发板和陀螺仪的连接
-```shell
-cd
-ls /dev/ttyACM*
-```
-<img src="./src/docs/dev2.png" width="450" height="auto">
-
-***注意：/dev/ttyACM0是单片机设备，/dev/ttyACM1是IMU设备，两者要各自对应***
-
-然后给用usb连接的开发板和陀螺仪设置权限
-```shell
-sudo chmod -R 777 /dev/ttyACM*
-```
-接着运行上位机程序
-```shell
-roslaunch legged_controllers one_start_real.launch
-```
-此时rviz中的机器人模型不动，并且姿势和实机一样
-
-2. 在rqt里面设置***kp_position=100***, ***kd_position=1***，然后在现实世界里扶正机器人，机器人此时稳定站立。
-
-后面的步骤和上面仿真一样，另外遥控器连接后打开遥控器开关，它会自动发布cmd\_cel话题，不需要再运行rosrun rqt\_robot\_steering rqt_robot\_steering 
-
-
-
-
-## 参考
-
-### 代码参考
-
-https://github.com/bridgedp/hunter_bipedal_control
-
-https://github.com/HighTorque-Robotics/livelybot_dynamic_control
-
-https://github.com/qiayuanl/legged_control
-
-### 文献参考
-[OCS2安装参考1](https://blog.csdn.net/Study__ing_/article/details/140177463?fromshare=blogdetail&sharetype=blogdetail&sharerId=140177463&sharerefer=PC&sharesource=sleeer_zzZZ&sharefrom=from_link)
-
-[OCS2安装参考2](https://blog.csdn.net/m0_52545777/article/details/140276558?fromshare=blogdetail&sharetype=blogdetail&sharerId=140276558&sharerefer=PC&sharesource=sleeer_zzZZ&sharefrom=from_link)
-
-[基于NMPC和WBC的双足机器人控制框架简介](https://mcpocket.blog.csdn.net/article/details/136541630?fromshare=blogdetail&sharetype=blogdetail&sharerId=136541630&sharerefer=PC&sharesource=sleeer_zzZZ&sharefrom=from_link)
-
-[OCS2代码解析：Quadrotor]https://zhuanlan.zhihu.com/p/687952253
-
-```
-# State Estimation
-
-[1] Flayols T, Del Prete A, Wensing P, et al. Experimental evaluation of simple estimators for humanoid robots[C]//2017 IEEE-RAS 17th International Conference on Humanoid Robotics (Humanoids). IEEE, 2017: 889-895.
-
-[2] Bloesch M, Hutter M, Hoepflinger M A, et al. State estimation for legged robots-consistent fusion of leg kinematics and IMU[J]. Robotics, 2013, 17: 17-24.
-
-# MPC
-
-[3] Di Carlo J, Wensing P M, Katz B, et al. Dynamic locomotion in the mit cheetah 3 through convex model-predictive control[C]//2018 IEEE/RSJ international conference on intelligent robots and systems (IROS). IEEE, 2018: 1-9.
-
-[4] Grandia R, Jenelten F, Yang S, et al. Perceptive Locomotion Through Nonlinear Model-Predictive Control[J]. IEEE Transactions on Robotics, 2023.
-
-[5] Sleiman J P, Farshidian F, Minniti M V, et al. A unified mpc framework for whole-body dynamic locomotion and manipulation[J]. IEEE Robotics and Automation Letters, 2021, 6(3): 4688-4695.
-
-# WBC
-
-[6] Bellicoso C D, Gehring C, Hwangbo J, et al. Perception-less terrain adaptation through whole body control and hierarchical optimization[C]//2016 IEEE-RAS 16th International Conference on Humanoid Robots (Humanoids). IEEE, 2016: 558-564.
-
-[7] Kim D, Di Carlo J, Katz B, et al. Highly dynamic quadruped locomotion via whole-body impulse control and model predictive control[J]. arXiv preprint arXiv:1909.06586, 2019.
-```
+订阅 `/neck/joint_states` 可验证反馈是否来自目标电机。
+
+## 控制信号链梳理
+1. `backbringup_real.launch` 在指定命名空间下注入串口与控制循环参数，并包含 `legged_dm_hw.launch`。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L1-L34】
+2. `legged_dm_hw.launch` 生成 URDF、加载 `dm.yaml`，并启动硬件节点 `legged_dm_hw`。【F:legged_examples/legged_dm_hw/launch/legged_dm_hw.launch†L1-L20】【F:legged_examples/legged_dm_hw/config/dm.yaml†L1-L6】
+3. `legged::DmHW` 初始化后订阅命令、IMU 与急停话题；其基类 `LeggedHW` 构造 `dmbot_serial::robot` 完成串口通信。【F:legged_examples/legged_dm_hw/src/legged_dm_hw.cpp†L46-L70】【F:legged_hw/src/LeggedHW.cpp†L15-L33】【F:dmbot_serial/src/robot_connect.cpp†L52-L163】
+4. 控制器管理器加载 `joint_state_controller` 与 `AllJointsHybridController`，提供多种话题接口。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L18-L33】【F:simple_hybrid_joint_controller/src/AllJointsHybridController.cpp†L1-L135】
+5. `DmHW::write()` 将命令映射到串口帧，通过 `dmbot_serial::robot` 编码发送并接收反馈，最终发布到 `/joint_states`。【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L42-L114】【F:dmbot_serial/src/robot_connect.cpp†L244-L420】
+
+## 常见运行流程
+### Gazebo 仿真
+1. 启动仿真与控制器：
+   ```bash
+   roslaunch legged_controllers one_start_gazebo.launch
+   ```
+2. 在 `rqt_reconfigure` 中设置 `kp_position=100`、`kd_position=1`，在 Gazebo 中按 `Ctrl+Shift+R` 让机器人起立。
+3. 通过手柄或 `rqt_robot_steering` 发布 `/cmd_vel`，并根据需求发布 `/reset_estimation`、`/load_controller` 与 `/set_walk` 等话题。
+
+### 实机调试
+1. 为 `/dev/ttyACM*` 设备授予权限并确认串口编号：
+   ```bash
+   ls /dev/ttyACM*
+   sudo chmod a+rw /dev/ttyACM*
+   ```
+2. 启动实机控制：
+   ```bash
+   roslaunch legged_controllers one_start_real.launch
+   ```
+3. 在 `rqt_reconfigure` 中设置同样的 KP/KD，扶正机器人，随后按照仿真流程下达行走指令。
+
+## 深入学习
+- [基于 NMPC 和 WBC 的双足机器人控制框架简介](https://mcpocket.blog.csdn.net/article/details/136541630)
+- [dm-control：ros-control 与达妙电机示例](https://gitee.com/xauter/dm-control)
+- 相关开源项目：
+  - https://github.com/bridgedp/hunter_bipedal_control
+  - https://github.com/HighTorque-Robotics/livelybot_dynamic_control
+  - https://github.com/qiayuanl/legged_control
+- 参考文献：Flayols 等（2017）、Bloesch 等（2013）、Di Carlo 等（2018）、Grandia 等（2023）、Sleiman 等（2021）、Bellicoso 等（2016）、Kim 等（2019）。
+
+## 致谢
+感谢 leggedrobotics、ANYbotics 及社区贡献的开源资源，为本仓库的算法与工具提供了坚实基础。
