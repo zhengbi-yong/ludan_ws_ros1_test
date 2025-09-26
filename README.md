@@ -17,6 +17,38 @@
 | `src/wanren_arm` | WanRen 上肢 URDF，供 Launch 动态生成描述文件。 【F:src/legged_examples/legged_dm_hw/launch/legged_dm_hw.launch†L5-L12】|
 | `src/motor_control_gui4a.py` | Tkinter GUI，针对 ID7-13 提供速度/位置/力矩模式调试。 【F:src/motor_control_gui4a.py†L1-L153】|
 
+## 串口电机测试实操指南
+以下步骤可帮助你在不同控制板（如 `/dev/mcu_neck`、`/dev/mcu_leftarm` 等）上逐一验证各个 CAN ID 电机的联通性。流程覆盖硬件接线、参数准备、启动测试与结果判定四个阶段。
+
+### 1. 硬件准备
+1. **接线与供电**：确认末端 STM32 控制板通过 USB-C/Type-B 与上位机直连，并在上电前检查 48 V/24 V 总线与电机驱动器接线牢靠。
+2. **禁用串口抢占服务**：Ubuntu 20.04 默认启用 `ModemManager`，可能导致串口被占用，建议在机器人主机上执行 `sudo systemctl disable --now ModemManager.service`。仓库在环境要求中也推荐禁用该服务以提升串口稳定性。【F:src/README.md†L9-L18】
+3. **用户权限与串口命名**：
+   - 把当前用户加入 `dialout` 组：`sudo usermod -a -G dialout $USER && newgrp dialout`。
+   - 重新插拔控制板后执行 `dmesg | tail` 或 `ls /dev/ttyACM*` 确认出现的新串口节点，依据控制板用途重命名到统一的 `/dev/mcu_*` 规则（常用做法是在 `/etc/udev/rules.d/99-ludan.rules` 中根据串口的 `idVendor`/`idProduct`/序列号创建软链接）。
+   - 通过 `sudo chmod a+rw /dev/mcu_*` 临时赋予可读写权限，确保后续节点能正常访问串口设备。【F:src/README.md†L171-L187】
+
+### 2. 参数与布局确认
+1. **默认布局**：`dmbot_serial::robot` 若未读取到参数服务器上的 `motor_layout`，会自动落回 30 路默认布局，并按 `机器人名_肢体名_关节名` 生成唯一的关节名称。【F:src/dmbot_serial/src/robot_connect.cpp†L217-L305】
+2. **自定义布局文件**：为每块控制板新建一个 YAML（例如 `config/neck.yaml`），按照 CAN ID 顺序枚举需要激活的关节；若要跳过某些 ID，可保留占位条目保持索引一致，示例可参考 `src/README.md` 中的配置段落。【F:src/README.md†L97-L160】
+3. **加载参数**：在启动测试前执行 `rosparam load config/neck.yaml /neck_bridge` 将布局写入对应命名空间，确保 `robot_connect` 初始化时能读取到目标布局。【F:src/README.md†L118-L135】
+
+### 3. 启动测试节点
+1. **创建专属命名空间**：为避免多块板子的反馈互相覆盖，建议为每个串口分配独立命名空间（例如 `neck_bridge`、`leftarm_bridge`），并在 Launch 中设置 `__ns` 与 `port` 参数。
+2. **使用 `test_motor` 节点**：该节点默认以 200 Hz 推送正弦指令，并在控制台打印部分电机反馈，适合快速验证串口链路。可以直接调用现有 Launch：
+   ```bash
+   roslaunch dmbot_serial test_motor.launch \
+     port:=/dev/mcu_neck __ns:=neck_bridge robot_name:=ludan
+   ```
+   其中 `port` 指向目标控制板串口，`robot_name` 会拼接进关节命名；需要切换到左臂控制板时，只需改成 `port:=/dev/mcu_leftarm __ns:=leftarm_bridge` 即可。【F:src/dmbot_serial/launch/test_motor.launch†L1-L8】【F:src/dmbot_serial/src/robot_connect.cpp†L112-L169】【F:src/dmbot_serial/src/test_motor.cpp†L7-L78】
+3. **调整测试幅度**：为确保安全，`test_motor` 默认零幅值输出。若要小角度摆动某个 CAN ID，可在命令行附加参数 `_pos_amp:=0.05 _kp:=2.0 _kd:=0.1` 或在 Launch 文件中修改对应 `<param>`，幅值与增益会传入 `fresh_cmd_motor_data()` 并经串口下发。【F:src/dmbot_serial/src/test_motor.cpp†L14-L49】
+
+### 4. 验证反馈与常见排查
+1. **观察串口日志**：若串口被占用或波特率设置错误，`robot_connect` 会在初始化时抛出 “Unable to open motor serial port” 日志，需要重新检查 udev 配置或波特率参数。【F:src/dmbot_serial/src/robot_connect.cpp†L143-L181】
+2. **检查 `joint_states`**：在对应命名空间下运行 `rostopic echo /neck_bridge/joint_states`，应能看到名称包含 `robot_name_肢体_关节` 的条目；若只有零值或数量不符，需确认 YAML 中的条目与实际 CAN ID 一一对应。【F:src/dmbot_serial/src/robot_connect.cpp†L187-L268】
+3. **点动单个电机**：可在加载完布局后，通过 `rostopic pub` 向 `/neck_bridge/all_joints_hjc_neck/command_one` 发送命令，仅指定目标索引的关节进行微小动作，示例命令可参考 `src/README.md` 中的点动流程。【F:src/README.md†L136-L160】
+4. **GUI 辅助调试**：对于需要频繁切换模式的电机，可运行 `motor_control_gui4a.py`，它会向 `command_one`/`command_same` 发布话题，并提供一键急停按钮以防突发情况。【F:src/motor_control_gui4a.py†L21-L144】
+
 ## 核心功能模块
 ### 串口桥接：`dmbot_serial`
 - 支持默认 30 路电机布局，并允许从参数服务器加载自定义 `motor_layout`；若缺失则回落到内置映射并记录名称去重情况。【F:src/dmbot_serial/src/robot_connect.cpp†L217-L303】
