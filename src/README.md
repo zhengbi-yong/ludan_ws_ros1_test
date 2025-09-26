@@ -12,6 +12,19 @@
 
 为了让“ludan”机器人在扩展不同的肢体时保持清晰的命名，本仓库新增了结构化的电机配置方式。所有控制节点都会读取统一的参数，并按照 `机器人名_肢体名_关节名` 的格式在 `/joint_states` 中发布电机名称。
 
+## 仓库结构概览
+
+整个工作空间采用标准的 `catkin` 结构，`src/` 目录下的主要功能包如下：
+
+- `dmbot_serial`：统一的串口桥接节点，负责读取参数服务器中的电机布局（`motor_layout`）并与 STM32 电机驱动板通信，同时在 `/joint_states` 发布反馈信息。
+- `dmbot_serial_leftarm`、`dmbot_serial_neck` 等：在旧版本中用于固定布局的串口节点，现在可以直接由 `dmbot_serial` 统一替代。
+- `simple_hybrid_joint_controller*`：针对不同肢体的 ros-control 控制器及其 `launch` 文件，常用于真实机械臂/腿的初始化与调试。
+- `legged_common`、`legged_hw`、`legged_examples`：双足机器人控制的核心算法、硬件接口与示例配置，对应 OCS2 + ros-control 框架。
+- `right_arm_hw`、`right_arm_moveit_config`、`wanren_arm`：右臂硬件接口与 MoveIt! 规划配置，用于上肢控制与轨迹规划。
+- `test_led`、`motor_control_gui4a.py` 等工具：提供基础的硬件连通性测试和 GUI 调试脚本。
+
+建议先阅读各包下的 `README` 或 `launch` 文件，了解节点命名与话题接口，再按照需求组合使用。
+
 ### 关键参数
 
 - `~robot_name`：机器人名称，默认值为 `ludan`。
@@ -36,6 +49,51 @@ motor_layout:
 ```
 
 如果未来需要为 ludan 安装 6 个机械臂，只需在 `motor_layout` 中继续添加新的肢体和关节即可，控制程序会自动识别数量并生成对应的串口通信帧。
+
+### 多末端控制板的推荐配置流程
+
+当机器人接入多个串口控制板（例如 `/dev/mcu_neck`、`/dev/mcu_leftarm`、`/dev/mcu_rightarm`、`/dev/mcu_leftleg`、`/dev/mcu_rightleg`、`/dev/mcu_waist`）时，可以为每块控制板单独启动一个 `dmbot_serial::robot` 节点，并通过命名空间隔离参数：
+
+1. 为每个控制板准备一份 YAML 布局文件，示例：
+
+   ```yaml
+   # config/neck.yaml
+   robot_name: ludan
+   motor_layout:
+     - {limb: neck, joint: pitch, type: 4340}
+     - {limb: neck, joint: yaw,   type: 4340}
+   ```
+
+   ```yaml
+   # config/right_leg.yaml
+   robot_name: ludan
+   motor_layout:
+     - {limb: right_leg, joint: hip_yaw,   type: 10010l}
+     - {limb: right_leg, joint: hip_roll,  type: 10010l}
+     - {limb: right_leg, joint: hip_pitch, type: 10010l}
+     - {limb: right_leg, joint: knee,      type: 6248p}
+     - {limb: right_leg, joint: ankle,     type: 4340}
+   ```
+
+2. 在运行前，依次加载参数并指定串口端口，例如：
+
+   ```bash
+   rosparam load config/neck.yaml /neck_bridge
+   roslaunch dmbot_serial test_motor.launch \
+     port:=/dev/mcu_neck robot_name:=ludan __ns:=neck_bridge
+   ```
+
+   ```bash
+   rosparam load config/right_leg.yaml /right_leg_bridge
+   roslaunch dmbot_serial test_motor.launch \
+     port:=/dev/mcu_rightleg robot_name:=ludan __ns:=right_leg_bridge
+   ```
+
+   这样每个命名空间都会生成独立的 `/joint_states` 子话题（例如 `/neck_bridge/joint_states`），同时保留统一的命名规则，便于在上层控制器中聚合。
+
+3. 若需要集中使用所有电机的关节状态，可以在上层节点中对多个命名空间的 `joint_states` 进行 remap 或编写聚合节点。
+
+`dmbot_serial` 会自动按照 `motor_layout` 的长度调整串口帧，因此只需保证 YAML 文件与实际接线顺序一致即可，无需修改 C++ 源码。
 
 ### 使用建议
 
