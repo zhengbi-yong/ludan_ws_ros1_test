@@ -1,0 +1,21 @@
+<launch>
+  <!-- 机器人类型 -->
+  <arg name="robot_type" default="neck" doc="Robot type for neck MCU"/>
+
+  <!-- 硬件驱动节点 -->
+  <node name="neck_hw" pkg="legged_dm_hw" type="legged_dm_hw"
+        respawn="false" output="screen">
+
+    <!-- 必须参数 -->
+    <param name="loop_frequency" value="500"/>
+    <param name="cycle_time_error_threshold" value="0.002"/>
+    <param name="thread_priority" value="95"/>
+
+    <!-- URDF（要有 neck 部分） -->
+    <param name="legged_robot_description"
+           command="$(find xacro)/xacro $(find wanren_arm)/urdf/wanren_arm_neck.urdf robot_type:=$(arg robot_type)"/>
+    <param name="manual_topic_override" value="true"/>
+    <param name="manual_cmd_timeout" value="0.2"/>
+    <rosparam file="$(find neck_dm_hw)/config/neck.yaml" command="load"/>
+  </node>
+</launch>

@@ -1,0 +1,43 @@
+<launch>
+  <!-- 命名空间：每块 MCU 不同 -->
+  <arg name="ns" default="mcu2"/>
+  <arg name="port" default="/dev/ttyACM1"/>
+  <arg name="baud" default="921600"/>
+
+  <group ns="$(arg ns)">
+
+    <param name="loop_hz" value="500"/>
+    <param name="cycle_time_error_threshold" value="0.002"/>
+    <param name="thread_priority" value="95"/>
+    <!-- 串口参数（相对路径，落在 ns 下） -->
+    <param name="port" value="$(arg port)"/>
+    <param name="baud" value="$(arg baud)"/>
+    
+    <!-- 硬件 bringup（包含上面的 legged_dm_hw.launch） -->
+    <include file="$(find neck_dm_hw)/launch/neck_dm_hw.launch">
+      <arg name="robot_type" value="dm"/>
+    </include>
+
+    <!-- 控制器配置 -->
+    <rosparam param="joint_state_controller">
+      type: joint_state_controller/JointStateController
+      publish_rate: 100
+    </rosparam>
+
+    <rosparam param="all_joints_hjc_neck">
+    type: simple_hjc/AllJointsHybridController
+    joints: ['neck_l1_joint','neck_l2_joint','neck_l3_joint','neck_l4_joint','neck_l5_joint','neck_l6_joint','neck_l7_joint',
+             'neck_r1_joint','neck_r2_joint','neck_r3_joint','neck_r4_joint','neck_r5_joint','neck_r6_joint','neck_r7_joint']
+    default_kp: 0.0
+    default_kd: 0.0
+    default_vel: 0.0
+    default_ff:  0.0
+    </rosparam>
+
+    <!-- spawner 要带命名空间 -->
+    <node pkg="controller_manager" type="spawner" name="spawner"
+          output="screen"
+          args="joint_state_controller all_joints_hjc_neck"/>
+  </group>
+</launch>
+

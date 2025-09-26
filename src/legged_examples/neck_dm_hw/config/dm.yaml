@@ -1,0 +1,35 @@
+neck_dm_hw:
+  loop_frequency: 500
+  cycle_time_error_threshold: 0.002
+  thread_priority: 95
+  power_limit: 6
+  contact_threshold: 200
+
+# 左侧关节
+neck_l1_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l2_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l3_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l4_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l5_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l6_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}
+
+neck_l7_joint:
+  type: effort_controllers/JointPositionController
+  pid: {p: 100.0, i: 0.0, d: 1.0}

@@ -1,0 +1,31 @@
+<launch>
+  <arg name="robot_type" default="dm" doc="Robot type: [yks]"/>
+
+  <!-- Arm 硬件接口 -->
+  <node name="rightarm_hw" pkg="legged_dm_hw" type="legged_dm_hw"
+        respawn="false" clear_params="true" output="screen">
+
+    <param name="legged_robot_description"
+           command="$(find xacro)/xacro $(find wanren_arm)/urdf/wanren_arm.urdf robot_type:=$(arg robot_type)"/>
+    <param name="manual_topic_override" value="true"/>
+    <param name="manual_cmd_timeout" value="0.2"/>
+    <rosparam file="$(find legged_dm_hw)/config/$(arg robot_type).yaml" command="load"/>
+    <param name="loop_frequency" value="500"/>
+  <param name="cycle_time_error_threshold" value="0.002"/>
+  <param name="thread_priority" value="95"/>
+  </node>
+
+  <!-- Leg 硬件接口 -->
+  <node name="neck_hw" pkg="neck_dm_hw" type="neck_dm_hw"
+        respawn="false" clear_params="true" output="screen">
+
+    <param name="legged_robot_description"
+           command="$(find xacro)/xacro $(find wanren_arm)/urdf/wanren_arm_neck.urdf robot_type:=$(arg robot_type)"/>
+    <param name="manual_topic_override" value="true"/>
+    <param name="manual_cmd_timeout" value="0.2"/>
+    <rosparam file="$(find legged_dm_hw)/config/$(arg robot_type).yaml" command="load"/>
+    <param name="loop_frequency" value="500"/>
+  <param name="cycle_time_error_threshold" value="0.002"/>
+  <param name="thread_priority" value="95"/>
+  </node>
+</launch>
