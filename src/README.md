@@ -33,22 +33,51 @@
 
 ### 示例配置
 
-可以使用 `rosparam` 或 YAML 文件为机器人配置布局，例如：
+新版默认参数已经按照当前 ludan 机器人硬件配置好了 **30 个电机**：
+
+- 左臂、右臂各 7 个关节。
+- 左腿、右腿各 6 个关节。
+- 脖子 3 个关节。
+- 腰部 1 个关节。
+
+如果节点启动时没有显式传入 `motor_layout`，串口桥接程序会自动加载以下默认布局：
 
 ```yaml
 robot_name: ludan
 motor_layout:
-  - {limb: right_arm, joint: shoulder_yaw,  type: 10010l}
+  - {limb: right_arm, joint: shoulder_yaw,   type: 10010l}
   - {limb: right_arm, joint: shoulder_pitch, type: 10010l}
-  - {limb: right_arm, joint: elbow,         type: 6248p}
-  - {limb: right_arm, joint: wrist_yaw,     type: 4340}
-  - {limb: left_arm,  joint: shoulder_yaw,  type: 6248p}
-  - {limb: left_arm,  joint: wrist_roll,    type: 4340}
-  - {limb: waist,     joint: yaw,           type: 10010l}
-  - {limb: neck,      joint: pitch,         type: 4340}
+  - {limb: right_arm, joint: shoulder_roll,  type: 10010l}
+  - {limb: right_arm, joint: elbow_pitch,    type: 6248p}
+  - {limb: right_arm, joint: wrist_pitch,    type: 4340}
+  - {limb: right_arm, joint: wrist_roll,     type: 4340}
+  - {limb: right_arm, joint: wrist_yaw,      type: 4340}
+  - {limb: left_arm,  joint: shoulder_yaw,   type: 6248p}
+  - {limb: left_arm,  joint: shoulder_pitch, type: 6248p}
+  - {limb: left_arm,  joint: shoulder_roll,  type: 6248p}
+  - {limb: left_arm,  joint: elbow_pitch,    type: 4340}
+  - {limb: left_arm,  joint: wrist_pitch,    type: 4340}
+  - {limb: left_arm,  joint: wrist_roll,     type: 4340}
+  - {limb: left_arm,  joint: wrist_yaw,      type: 4340}
+  - {limb: right_leg, joint: hip_yaw,        type: 10010l}
+  - {limb: right_leg, joint: hip_roll,       type: 10010l}
+  - {limb: right_leg, joint: hip_pitch,      type: 10010l}
+  - {limb: right_leg, joint: knee_pitch,     type: 6248p}
+  - {limb: right_leg, joint: ankle_pitch,    type: 4340}
+  - {limb: right_leg, joint: ankle_roll,     type: 4340}
+  - {limb: left_leg,  joint: hip_yaw,        type: 10010l}
+  - {limb: left_leg,  joint: hip_roll,       type: 10010l}
+  - {limb: left_leg,  joint: hip_pitch,      type: 10010l}
+  - {limb: left_leg,  joint: knee_pitch,     type: 6248p}
+  - {limb: left_leg,  joint: ankle_pitch,    type: 4340}
+  - {limb: left_leg,  joint: ankle_roll,     type: 4340}
+  - {limb: neck,      joint: yaw,            type: 4340}
+  - {limb: neck,      joint: pitch,          type: 4340}
+  - {limb: neck,      joint: roll,           type: 4340}
+  - {limb: waist,     joint: yaw,            type: 10010l}
 ```
 
-如果未来需要为 ludan 安装 6 个机械臂，只需在 `motor_layout` 中继续添加新的肢体和关节即可，控制程序会自动识别数量并生成对应的串口通信帧。
+可以使用 `rosparam` 或 YAML 文件覆盖上述默认值，例如只配置部分电机或替换电机型号。扩展到更多肢体时只需继续追加条目即可，控制程序会自动识别数量并生成对应的串口通信帧。
 
 ### 多末端控制板的推荐配置流程
 

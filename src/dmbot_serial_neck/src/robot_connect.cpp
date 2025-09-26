@@ -216,21 +216,63 @@ void robot::initializeMotorConfiguration(const std::vector<MotorLayoutEntry>& la
 
 std::vector<MotorLayoutEntry> robot::defaultMotorLayout() const
 {
-  return {
-      {"right_arm", "shoulder_yaw", "10010l"},
-      {"right_arm", "shoulder_pitch", "10010l"},
-      {"right_arm", "shoulder_roll", "10010l"},
-      {"right_arm", "elbow_pitch", "6248p"},
-      {"right_arm", "wrist_pitch", "4340"},
-      {"right_arm", "wrist_roll", "4340"},
-      {"right_arm", "wrist_yaw", "4340"},
-      {"left_arm", "shoulder_yaw", "6248p"},
-      {"left_arm", "shoulder_pitch", "6248p"},
-      {"left_arm", "shoulder_roll", "6248p"},
-      {"left_arm", "elbow_pitch", "4340"},
-      {"left_arm", "wrist_pitch", "4340"},
-      {"left_arm", "wrist_roll", "4340"},
-      {"left_arm", "wrist_yaw", "4340"}};
+  using JointSpec = std::pair<std::string, std::string>;
+  const std::vector<std::pair<std::string, std::vector<JointSpec>>> limbs = {
+      {"right_arm",
+       {{"shoulder_yaw", "10010l"},
+        {"shoulder_pitch", "10010l"},
+        {"shoulder_roll", "10010l"},
+        {"elbow_pitch", "6248p"},
+        {"wrist_pitch", "4340"},
+        {"wrist_roll", "4340"},
+        {"wrist_yaw", "4340"}}},
+      {"left_arm",
+       {{"shoulder_yaw", "6248p"},
+        {"shoulder_pitch", "6248p"},
+        {"shoulder_roll", "6248p"},
+        {"elbow_pitch", "4340"},
+        {"wrist_pitch", "4340"},
+        {"wrist_roll", "4340"},
+        {"wrist_yaw", "4340"}}},
+      {"right_leg",
+       {{"hip_yaw", "10010l"},
+        {"hip_roll", "10010l"},
+        {"hip_pitch", "10010l"},
+        {"knee_pitch", "6248p"},
+        {"ankle_pitch", "4340"},
+        {"ankle_roll", "4340"}}},
+      {"left_leg",
+       {{"hip_yaw", "10010l"},
+        {"hip_roll", "10010l"},
+        {"hip_pitch", "10010l"},
+        {"knee_pitch", "6248p"},
+        {"ankle_pitch", "4340"},
+        {"ankle_roll", "4340"}}},
+      {"neck",
+       {{"yaw", "4340"},
+        {"pitch", "4340"},
+        {"roll", "4340"}}},
+      {"waist",
+       {{"yaw", "10010l"}}}};
+
+  std::size_t total_joints = 0;
+  for (const auto& limb : limbs)
+  {
+    total_joints += limb.second.size();
+  }
+
+  std::vector<MotorLayoutEntry> layout;
+  layout.reserve(total_joints);
+
+  for (const auto& limb : limbs)
+  {
+    for (const auto& joint : limb.second)
+    {
+      layout.push_back({limb.first, joint.first, joint.second});
+    }
+  }
+
+  return layout;
 }
 
 std::vector<MotorLayoutEntry> robot::loadMotorLayout()
