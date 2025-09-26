@@ -190,7 +190,7 @@ motor_layout:
    如果 MCU 尚未解锁串口权限，别忘了在运行前执行 `sudo chmod a+rw /dev/mcu_*` 并确认 `ModemManager` 已停用。
 
 3. **通过 `command_one` 话题点动目标电机。**
-   `AllJointsHybridController` 的单路接口约定消息格式为 `[index, pos, vel, kp, kd, ff]`，缺省字段会自动沿用上一次指令。将 `index` 设置为前述 `motor_layout` 对应的下标即可控制指定 CAN ID。例如：
+`AllJointsHybridController` 的单路接口约定消息格式为 `[index, pos, vel, kp, kd, ff]`，缺省字段会自动沿用上一次指令。将 `index` 设置为前述 `motor_layout` 对应的下标即可控制指定 CAN ID。例如：
 
    ```bash
    # 让 /dev/mcu_neck 上的 CAN 7 做 0.2 rad 的小幅摆动
@@ -203,6 +203,31 @@ motor_layout:
    ```
 
    发布过程中可以订阅 `neck/joint_states` 或 `left_leg/joint_states` 来确认反馈是否来自目标电机。若需要恢复静止，只需再次发布零姿态/零力矩（或调用 `command_same` 将 KP/KD 置零）即可。
+
+### 从 `roslaunch` 到末端电机的完整信号链
+
+在全身控制的场景下，可以参考 `simple_hybrid_joint_controller/launch/backbringup_real.launch` 这类入口 `launch` 文件。完整的数据流如下：
+
+1. **启动阶段的节点与参数加载**。
+   - `backbringup_real.launch` 首先在指定命名空间下注入串口参数（`port`、`baud`）以及 `loop_hz`、`thread_priority` 等控制循环参数，并 `include` `legged_dm_hw/launch/legged_dm_hw.launch`。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L1-L34】
+   - `legged_dm_hw.launch` 会调用 `xacro` 生成 `legged_dm_hw/legged_robot_description`，加载 `dm.yaml` 中的循环频率、电源限制等配置，然后启动硬件节点 `legged_dm_hw`。【F:legged_examples/legged_dm_hw/launch/legged_dm_hw.launch†L1-L20】【F:legged_examples/legged_dm_hw/config/dm.yaml†L1-L6】
+
+2. **硬件节点内部的初始化**。
+   - `legged_dm_hw` 可执行体创建 `legged::DmHW` 硬件接口，并在其 `init()` 中订阅 `/hybrid_cmd`、`/imu/data` 与 `/emergency_stop`，同时根据参数决定是否允许手动话题覆盖。【F:legged_examples/legged_dm_hw/src/legged_dm_hw.cpp†L46-L70】【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L19-L40】
+   - `DmHW` 继承自 `LeggedHW`。在基类 `LeggedHW::init()` 中会加载 URDF 并实例化一个 `dmbot_serial::robot`，它负责与 STM32 电机接口板进行串口通信，并自动按照 `motor_layout` 创建每个电机的名称、索引和类型。【F:legged_hw/src/LeggedHW.cpp†L15-L33】【F:dmbot_serial/src/robot_connect.cpp†L52-L163】
+
+3. **控制器加载与话题接口**。
+   - `backbringup_real.launch` 中的 `controller_manager` `spawner` 会在同一命名空间下加载 `joint_state_controller` 与 `simple_hjc/AllJointsHybridController`。前者以 100 Hz 发布关节状态，后者提供 `/command_same`、`/command_matrix`、`/command_one` 等多个话题接口接收位置、速度、阻尼、力矩命令。【F:simple_hybrid_joint_controller/launch/backbringup_real.launch†L18-L33】【F:simple_hybrid_joint_controller/src/AllJointsHybridController.cpp†L1-L135】
+   - `AllJointsHybridController` 在 `update()` 中把缓存的命令写入 `HybridJointHandle`，相当于设置每个关节的目标状态。【F:simple_hybrid_joint_controller/src/AllJointsHybridController.cpp†L47-L101】
+
+4. **命令下发到串口**。
+   - `DmHW::write()` 会将控制器写入的目标值（或手动覆盖指令）乘以电机方向系数并存入 `dmSendcmd_`，随后逐一调用 `motorsInterface->fresh_cmd_motor_data()` 和 `send_motor_data()`。这一接口由 `dmbot_serial::robot` 提供，将浮点命令缓存并立即刷新到串口发送缓冲区。【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L56-L114】【F:dmbot_serial/src/robot_connect.cpp†L327-L376】
+   - `send_motor_data()` 根据电机型号选择不同的量程，把位置、速度、KP、KD、力矩转换为对应的 12/16-bit 无符号整数，封装成 11 字节的数据帧（`0xFE` 帧头 + 电机索引 + 8 字节数据 + 校验），通过 `serial::Serial` 写入到 STM32。【F:dmbot_serial/src/robot_connect.cpp†L327-L420】
+
+5. **反馈回流**。
+   - STM32 返回的反馈帧同样由 `dmbot_serial::robot::get_motor_data_thread()` 按预期长度接收、校验，依据电机型号调用 `dmXXXX_fbdata()` 将编码值反解到浮点的关节位置、速度与力矩。`DmHW::read()` 便从 `motorsInterface` 中取出这些浮点数，更新 ROS 控制框架的关节状态，并通过 `joint_state_controller` 发布出来。【F:dmbot_serial/src/robot_connect.cpp†L244-L324】【F:legged_examples/legged_dm_hw/src/DmHW.cpp†L42-L85】
+
+综上，`roslaunch` 启动的硬件节点、控制器、串口桥接构成了一条闭环链路：上层控制器通过话题发送目标 → `AllJointsHybridController` 写入 `HybridJointHandle` → `DmHW` 把命令映射到电机方向并交给串口桥接 → `dmbot_serial::robot` 编码后写入串口 → STM32 执行并反馈，再经过相反流程回到 ROS 的 `joint_states`，从而实现对全身电机的精确控制。
 
 ### 使用建议
 
