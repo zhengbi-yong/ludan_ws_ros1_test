@@ -95,6 +95,86 @@ motor_layout:
 
 `dmbot_serial` 会自动按照 `motor_layout` 的长度调整串口帧，因此只需保证 YAML 文件与实际接线顺序一致即可，无需修改 C++ 源码。
 
+### 控制指定串口上的某几个电机
+
+在完成上面的多控制板配置后，可以通过 `simple_hybrid_joint_controller` 系列控制器点动某些特定的 CAN ID。整个流程分为三步：
+
+1. **为目标 MCU 准备独立的 `motor_layout`。**
+   `dmbot_serial::robot` 按照 `motor_layout` 的顺序把下标 `0..N-1` 映射到下位机的 CAN ID，因此 YAML 中的排列必须与实际 ID 一一对应。如果只想控制 `/dev/mcu_neck` 上的 CAN ID 7，可以准备如下示例（放在任意可访问目录，例如 `config/neck_can7.yaml`）：
+
+   ```yaml
+   robot_name: ludan
+   motor_layout:
+     # 前 7 个条目只占位，保证索引与硬件的 CAN 号对应
+     - {limb: neck, joint: reserve_0, type: 4340}
+     - {limb: neck, joint: reserve_1, type: 4340}
+     - {limb: neck, joint: reserve_2, type: 4340}
+     - {limb: neck, joint: reserve_3, type: 4340}
+     - {limb: neck, joint: reserve_4, type: 4340}
+     - {limb: neck, joint: reserve_5, type: 4340}
+     - {limb: neck, joint: reserve_6, type: 4340}
+     # 第 8 个条目（索引 7）就是需要控制的 CAN ID 7
+     - {limb: neck, joint: pitch, type: 4340}
+   ```
+
+   `/dev/mcu_leftleg` 上只想驱动 CAN ID 10 时同理，把 0~9 号补齐后再放入真正的关节信息，例如：
+
+   ```yaml
+   robot_name: ludan
+   motor_layout:
+     # 0~9 号为占位/其他电机，保持与硬件接线一致
+     - {limb: left_leg, joint: hip_yaw,        type: 10010l}
+     - {limb: left_leg, joint: hip_roll,       type: 10010l}
+     - {limb: left_leg, joint: hip_pitch,      type: 10010l}
+     - {limb: left_leg, joint: knee,           type: 6248p}
+     - {limb: left_leg, joint: ankle_pitch,    type: 4340}
+     - {limb: left_leg, joint: ankle_roll,     type: 4340}
+     - {limb: left_leg, joint: reserve_6,      type: 4340}
+     - {limb: left_leg, joint: reserve_7,      type: 4340}
+     - {limb: left_leg, joint: reserve_8,      type: 4340}
+     - {limb: left_leg, joint: reserve_9,      type: 4340}
+     # 下标 10（CAN ID 10）的真正目标电机
+     - {limb: left_leg, joint: ankle_extension, type: 4340}
+   ```
+
+   通过 `rosparam load config/neck_can7.yaml /neck` 或 `rosparam load config/left_leg_can10.yaml /left_leg` 将其挂到对应命名空间下。载入后可以通过 `rosparam get /neck/motor_layout` 等命令再次确认顺序。
+
+2. **启动对应 MCU 的硬件接口与控制器。**
+   - 颈部：
+
+     ```bash
+     roslaunch simple_hybrid_joint_controller_neck bringup_real.launch \
+       port:=/dev/mcu_neck baud:=921600
+     ```
+
+     上述 launch 会在 `neck` 命名空间中启动硬件接口以及 `all_joints_hjc_neck` 控制器。
+
+   - 左腿（示例使用可自定义命名空间的 `backbringup_real.launch`）：
+
+     ```bash
+     roslaunch simple_hybrid_joint_controller backbringup_real.launch \
+       ns:=left_leg port:=/dev/mcu_leftleg baud:=921600
+     ```
+
+     启动成功后，`/left_leg/all_joints_hjc` 控制器就绪，可同时管理 14 个关节（默认顺序为左腿 0~6、右腿 7~13）。
+
+   如果 MCU 尚未解锁串口权限，别忘了在运行前执行 `sudo chmod a+rw /dev/mcu_*` 并确认 `ModemManager` 已停用。
+
+3. **通过 `command_one` 话题点动目标电机。**
+   `AllJointsHybridController` 的单路接口约定消息格式为 `[index, pos, vel, kp, kd, ff]`，缺省字段会自动沿用上一次指令。将 `index` 设置为前述 `motor_layout` 对应的下标即可控制指定 CAN ID。例如：
+
+   ```bash
+   # 让 /dev/mcu_neck 上的 CAN 7 做 0.2 rad 的小幅摆动
+   rostopic pub -r 10 /neck/all_joints_hjc_neck/command_one \
+     std_msgs/Float64MultiArray "data: [7, 0.2, 0.0, 20.0, 1.0, 0.0]"
+
+   # 让 /dev/mcu_leftleg 上的 CAN 10 定位到 -0.1 rad，KP/KD 可按实际硬件调整
+   rostopic pub /left_leg/all_joints_hjc/command_one \
+     std_msgs/Float64MultiArray "data: [10, -0.1, 0.0, 30.0, 2.0, 0.0]"
+   ```
+
+   发布过程中可以订阅 `neck/joint_states` 或 `left_leg/joint_states` 来确认反馈是否来自目标电机。若需要恢复静止，只需再次发布零姿态/零力矩（或调用 `command_same` 将 KP/KD 置零）即可。
+
 ### 使用建议
 
 1. 肢体名称会自动转为小写并替换为空格的字符，因此建议直接使用英文或数字组合，例如 `left_arm`、`leg_front_left`、`arm_extra_1`。
