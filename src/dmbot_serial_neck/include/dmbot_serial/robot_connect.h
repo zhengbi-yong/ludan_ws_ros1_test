@@ -7,13 +7,13 @@
 #include <initializer_list>
 #include <fstream>
 #include <array>
-#include <serial/serial.h> 
+#include <serial/serial.h>
+#include <map>
+#include <vector>
+#include <string>
+#include <atomic>
 
 #include <sensor_msgs/JointState.h>
-
-//================ 电机数量统一开关 ================
-static constexpr int NUM_MOTORS = 14;     // <- 这里改电机总数（现为 14）
-//==============================================
 
 //4310
 #define P_MIN1 -12.5f
@@ -95,96 +95,104 @@ static constexpr int NUM_MOTORS = 14;     // <- 这里改电机总数（现为 1
 #define FRAME_HEADER      0X7B       // 帧头
 #define FRAME_TAIL        0X7D       // 帧尾
 
-//================= 协议长度（关键改动） =================
-// 下位机→上位机一帧长度：1(帧头) + NUM_MOTORS*5(每电机5字节) + 1(校验)
-#define RECEIVE_DATA_SIZE (1 + NUM_MOTORS*5 + 1)   // 14 电机时 = 72
-// 上位机→下位机单电机命令长度：固定 11
-#define SEND_DATA_SIZE    11
-//=======================================================
-
-// 上位机→下位机 数据结构
-typedef struct
+namespace dmbot_serial
 {
-    uint8_t tx[SEND_DATA_SIZE];        
-    unsigned char Frame_Tail; 
-}send_data_t;
+  struct MotorLayoutEntry
+  {
+    std::string limb;
+    std::string joint;
+    std::string type;
+  };
 
-// 下位机→上位机 数据结构
-typedef struct      
-{
-    uint8_t rx[RECEIVE_DATA_SIZE];
-    uint8_t Flag_Stop;
-    unsigned char Frame_Header;
-    unsigned char Frame_Tail;
-}rev_data_t;
-
-typedef struct      
-{
+  struct motor_data_t
+  {
     std::string name;
+    std::string limb;
+    std::string joint;
     std::string type;// 电机型号
     int index;
 
-    float pos;  
-    float vel;  
-    float tor; 
+    float pos;
+    float vel;
+    float tor;
     int p_int;
     int v_int;
     int t_int;
 
-    float pos_set; 
-    float vel_set; 
+    float pos_set;
+    float vel_set;
     float tor_set;
     float kp;
     float kd;
-}motor_data_t;
+  };
 
-namespace dmbot_serial
-{
   class robot
   {
-    private:
-        std::string robot_name, Serial_Type;
+   private:
+    static constexpr std::size_t kFeedbackWordSize = 5;
+    static constexpr std::size_t kSendDataSize = 11;
 
-        int motor_seial_baud;
-        std::string motor_serial_port;
-        serial::Serial serial_motor; // 电机串口
-        std::thread rec_thread;
-        rev_data_t Receive_Data;
+    enum class CheckMode
+    {
+      Receive,
+      Send
+    };
 
-        ros::NodeHandle n;        
-        ros::Publisher joint_state_pub;
-        std::thread pub_thread;
-        send_data_t Send_Data;
+    struct SendData
+    {
+      std::array<uint8_t, kSendDataSize> tx{};
+      unsigned char Frame_Tail{FRAME_TAIL};
+    };
 
-        //============== 这里从 10 改为 NUM_MOTORS ==============
-        std::array<motor_data_t, NUM_MOTORS> motors;
-        //=======================================================
+    std::string robot_name;
 
-    public:
-        robot();
-        ~robot();
-        void init_motor_serial(); 
-        void get_motor_data_thread();  // 串口接收线程
+    int motor_seial_baud;
+    std::string motor_serial_port;
+    serial::Serial serial_motor; // 电机串口
+    std::thread rec_thread;
 
-        void fresh_cmd_motor_data(double pos, double vel,double torque, double kp,double kd,int motor_idx);
-        void send_motor_data();
+    ros::NodeHandle n;
+    ros::Publisher joint_state_pub;
+    std::thread pub_thread;
+    SendData Send_Data;
 
-        void get_motor_data(double &pos,double &vel,double &torque, int motor_idx);
-        void publishJointStates(); 
-        
-        void dm4310_fbdata(motor_data_t& moto,uint8_t *data);
-        void dm4340_fbdata(motor_data_t& moto,uint8_t *data);
-        void dm6006_fbdata(motor_data_t& moto,uint8_t *data);
-        void dm8006_fbdata(motor_data_t& moto,uint8_t *data);
-        void dm6248p_fbdata(motor_data_t& moto,uint8_t *data);
-        void dm10010l_fbdata(motor_data_t& moto,uint8_t *data);
+    std::vector<uint8_t> receive_buffer_;
+    std::vector<motor_data_t> motors;
+    std::map<std::string, std::vector<std::size_t>> limb_index_map_;
+
+   public:
+    robot();
+    ~robot();
+    void init_motor_serial();
+    void get_motor_data_thread();  // 串口接收线程
+
+    void fresh_cmd_motor_data(double pos, double vel,double torque, double kp,double kd,int motor_idx);
+    void send_motor_data();
+
+    void get_motor_data(double &pos,double &vel,double &torque, int motor_idx);
+    void publishJointStates();
+    std::size_t motorCount() const;
+
+    void dm4310_fbdata(motor_data_t& moto,uint8_t *data);
+    void dm4340_fbdata(motor_data_t& moto,uint8_t *data);
+    void dm6006_fbdata(motor_data_t& moto,uint8_t *data);
+    void dm8006_fbdata(motor_data_t& moto,uint8_t *data);
+    void dm6248p_fbdata(motor_data_t& moto,uint8_t *data);
+    void dm10010l_fbdata(motor_data_t& moto,uint8_t *data);
 
 
-        unsigned char Check_Sum(unsigned char Count_Number,unsigned char mode);      
-        int16_t float_to_uint(float x_float, float x_min, float x_max, int bits);
-        float uint_to_float(int x_int, float x_min, float x_max, int bits);
+    unsigned char Check_Sum(unsigned char Count_Number,unsigned char mode);
+    int16_t float_to_uint(float x_float, float x_min, float x_max, int bits);
+    float uint_to_float(int x_int, float x_min, float x_max, int bits);
 
-        std::atomic<bool> stop_thread_ ;
+    std::atomic<bool> stop_thread_ {false};
+
+   private:
+    void initializeMotorConfiguration(const std::vector<MotorLayoutEntry>& layout);
+    std::vector<MotorLayoutEntry> defaultMotorLayout() const;
+    std::vector<MotorLayoutEntry> loadMotorLayout();
+    uint8_t computeChecksum(std::size_t count_number, CheckMode mode) const;
+    void ensureReceiveBuffer();
   };
 }
 #endif
