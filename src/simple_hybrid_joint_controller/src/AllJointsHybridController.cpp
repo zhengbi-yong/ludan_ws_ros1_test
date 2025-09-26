@@ -58,6 +58,9 @@ void AllJointsHybridController::starting(const ros::Time&) {
     cmd_[i][2] = default_kp_;               // kp
     cmd_[i][3] = default_kd_;               // kd
     cmd_[i][4] = default_ff_;               // ff
+
+    // 立即写入硬件接口，避免在第一个控制周期中输出未初始化的命令
+    handles_[i].setCommand(cmd_[i][0], cmd_[i][1], cmd_[i][2], cmd_[i][3], cmd_[i][4]);
   }
 }
 
