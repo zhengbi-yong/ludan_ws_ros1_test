@@ -21,7 +21,7 @@
 - `simple_hybrid_joint_controller*`：针对不同肢体的 ros-control 控制器及其 `launch` 文件，常用于真实机械臂/腿的初始化与调试。
 - `legged_common`、`legged_hw`、`legged_examples`：双足机器人控制的核心算法、硬件接口与示例配置，对应 OCS2 + ros-control 框架。
 - `right_arm_hw`、`right_arm_moveit_config`、`wanren_arm`：右臂硬件接口与 MoveIt! 规划配置，用于上肢控制与轨迹规划。
-- `test_led`、`motor_control_gui4a.py` 等工具：提供基础的硬件连通性测试和 GUI 调试脚本。
+- `motor_control_gui4a.py` 等工具：提供基础的硬件连通性测试和 GUI 调试脚本。
 
 建议先阅读各包下的 `README` 或 `launch` 文件，了解节点命名与话题接口，再按照需求组合使用。
 
