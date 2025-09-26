@@ -8,6 +8,41 @@
 
 该程序是基于[livelybot_dynamic_control](https://github.com/HighTorque-Robotics/livelybot_dynamic_control)、[hunter_bipedal_control](https://bridgedp.github.io/hunter_bipedal_control)以及[legged_control](https://github.com/qiayuanl/legged_control)上进行一些改进，主要是对**约束**进行了修改。
 
+## Ludan 结构化命名与配置
+
+为了让“ludan”机器人在扩展不同的肢体时保持清晰的命名，本仓库新增了结构化的电机配置方式。所有控制节点都会读取统一的参数，并按照 `机器人名_肢体名_关节名` 的格式在 `/joint_states` 中发布电机名称。
+
+### 关键参数
+
+- `~robot_name`：机器人名称，默认值为 `ludan`。
+- `~motor_layout`：电机布局列表。每个元素需要包含 `limb`（肢体名称）、`joint`（关节名称）以及 `type`（电机型号）。支持的肢体名称不限于 `left_arm`、`right_arm`、`left_leg`、`right_leg`、`waist`、`neck`，也可以自定义，例如 `arm_3`、`aux_leg_1` 等。
+- `~num_motors`：可选备用参数。当未提供 `motor_layout` 时用于指定电机数量。
+
+### 示例配置
+
+可以使用 `rosparam` 或 YAML 文件为机器人配置布局，例如：
+
+```yaml
+robot_name: ludan
+motor_layout:
+  - {limb: right_arm, joint: shoulder_yaw,  type: 10010l}
+  - {limb: right_arm, joint: shoulder_pitch, type: 10010l}
+  - {limb: right_arm, joint: elbow,         type: 6248p}
+  - {limb: right_arm, joint: wrist_yaw,     type: 4340}
+  - {limb: left_arm,  joint: shoulder_yaw,  type: 6248p}
+  - {limb: left_arm,  joint: wrist_roll,    type: 4340}
+  - {limb: waist,     joint: yaw,           type: 10010l}
+  - {limb: neck,      joint: pitch,         type: 4340}
+```
+
+如果未来需要为 ludan 安装 6 个机械臂，只需在 `motor_layout` 中继续添加新的肢体和关节即可，控制程序会自动识别数量并生成对应的串口通信帧。
+
+### 使用建议
+
+1. 肢体名称会自动转为小写并替换为空格的字符，因此建议直接使用英文或数字组合，例如 `left_arm`、`leg_front_left`、`arm_extra_1`。
+2. 若某些肢体暂时没有安装，可保留空列表或直接不在 `motor_layout` 中声明，代码会保持兼容。
+3. 所有串口桥接脚本、测试程序都会根据 `motor_layout` 自动调整数组长度，无需手工修改常量。
+
 ## 学习
 1. 理论框架
 
